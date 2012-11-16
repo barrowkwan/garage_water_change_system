@@ -27,20 +27,37 @@ LiquidCrystal_I2C lcd(0x27,16,2);
 RTC_DS1307 RTC;
 DHT dht(DHTPIN, DHTTYPE);
 EthernetUDP Udp;
-const int lcdStatusPin = 4;
+const int lcdStatusPin = 8;
+const int relayPin1 = 4;
+const int relayPin2 = 5;
+const int relayPin3 = 6;
+const int relayPin4 = 7;
+const int floatValveHighPin = 9;
+
 int lcdStatusPinState;
 int lcdStatusMenu = 0;
-
+int floatValveHighState;
 
 
 void setup()
 {
   byte mac[] = { 0x90, 0xA2, 0xDA, 0x0D, 0x45, 0x1D };
+//  byte mac[] = { 0x90, 0xA2, 0xDA, 0x0D, 0x44, 0xA8 };
   byte ip[] = { 192, 168, 210, 52 };
   byte twitter_server[] = { 128, 121, 146, 100 };
-  
-  pinMode(lcdStatusPin, INPUT);
+
   Serial.begin(9600);
+  //Wire.begin();
+  pinMode(lcdStatusPin, INPUT);
+  pinMode(floatValveHighPin, INPUT);
+  pinMode(relayPin1, OUTPUT);
+  pinMode(relayPin2, OUTPUT);
+  pinMode(relayPin3, OUTPUT);
+  pinMode(relayPin4, OUTPUT);
+  digitalWrite(relayPin1, 1);
+  digitalWrite(relayPin2, 1);
+  digitalWrite(relayPin3, 1);
+  digitalWrite(relayPin4, 1);
   Ethernet.begin(mac, ip);
   Udp.begin(8888);
   lcd.init();
@@ -57,18 +74,26 @@ void setup()
 
  
   Alarm.timerRepeat(15, Repeats);            // timer for every 15 seconds    
-  Alarm.timerOnce(10, OnceOnly);             // called once after 10 seconds 
+  Alarm.timerOnce(10, OnceOnly);             // called once after 10 seconds
+  floatValveHighState = bitRead(PORTD,floatValveHighPin);
 }
 
 void  loop(){
+  int currentfloatValveHighState;
   lcdStatusPinState = digitalRead(lcdStatusPin);
   if (lcdStatusPinState == LOW){
+    //Serial.println("LOW.....");                                                                                                                                                
     ++lcdStatusMenu;
     if (lcdStatusMenu >= 5)
       lcdStatusMenu = 0;
   }
   lcdDisplay();
   digitalClockDisplay();
+  currentfloatValveHighState = digitalRead(floatValveHighPin);
+  if (floatValveHighState != currentfloatValveHighState ){
+    Serial.println("Float Valve High State : " + String(currentfloatValveHighState));
+    floatValveHighState = currentfloatValveHighState;
+  }
   Alarm.delay(1000); 
 }
 
@@ -218,7 +243,9 @@ void ExplicitAlarm(){
 }
 
 void Repeats(){
-  Serial.println("15 second timer");         
+  int testPin = relayPin1;
+  Serial.println("15 second timer");
+  //digitalWrite(testPin,!bitRead(PORTD,testPin));
 }
 
 void OnceOnly(){
