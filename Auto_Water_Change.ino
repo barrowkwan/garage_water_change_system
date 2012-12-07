@@ -39,6 +39,13 @@ int lcdStatusMenu = 0;
 int floatValveHighState;
 
 
+int freeRam () {
+  extern int __heap_start, *__brkval; 
+  int v; 
+  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
+}
+
+
 void setup()
 {
   byte mac[] = { 0x90, 0xA2, 0xDA, 0x0D, 0x45, 0x1D };
@@ -256,7 +263,7 @@ void digitalClockDisplay()
 {
   // digital clock display of the time
   String currentTime = getCurrentTime();
-  Serial.println(currentTime);
+  Serial.println(currentTime + " -- " + freeRam());
 /*  lcd.clear();
   lcd.setCursor(0,0);
   lcd.print(currentTime.substring(0,10));
