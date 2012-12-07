@@ -74,7 +74,7 @@ void setup()
   Alarm.timerRepeat(600,PostTwitterStatus);
 
   // create the alarms 
-  Alarm.alarmRepeat(7,46,30, waterChange);  
+  Alarm.alarmRepeat(9,30,0, waterChange);  
 //  Alarm.alarmRepeat(dowSaturday,8,30,30,WeeklyAlarm);  // 8:30:30 every Saturday 
 //  Alarm.timerRepeat(15, Repeats);            // timer for every 15 seconds    
 //  Alarm.timerOnce(10, OnceOnly);             // called once after 10 seconds 
@@ -194,12 +194,12 @@ void digitalClockDisplay()
 {
   // digital clock display of the time
   
-  Serial.print(hour());
+  /*Serial.print(hour());
   printDigits(minute());
   printDigits(second());
-  Serial.println();
-  //lcd.setCursor(0,0);
-  //lcd.print(getTimeOnly());
+  Serial.println();*/
+  lcd.setCursor(0,0);
+  lcd.print(getTimeOnly());
 }
 
 void printDigits(int digits)
@@ -211,6 +211,7 @@ void printDigits(int digits)
 }
 
 void PostTwitterStatus(){
+/*
   float temperature  = dht.readTemperature(true);
   float humid = dht.readHumidity();
   char temp[20];
@@ -227,12 +228,13 @@ void PostTwitterStatus(){
   }
   //Serial.println("Status : " + getTime() + " | " + String(temp) + " | " + String(humidstr));
   postTwitter("Status : " + getTime() + " | " + String(temp) + " | " + String(humidstr));
+  */
+  postTwitter("Status : " + getTime());
 }
 
 void postTwitter(String msg){
-  Serial.println(msg);
   // Twitter account : garage@barrowkwan.com  "Barrow Garage Aquari"
-  /*
+  
   Twitter twitter("927020131-DEvJRTHsclJFOVEQ85ahXeH4vmYTSLGOEEDi01Vg");
   char tmsg[msg.length()+1];
   msg.toCharArray(tmsg,(msg.length()+1));
@@ -247,7 +249,7 @@ void postTwitter(String msg){
   } else {
     Serial.println("Twitter connection failed.");
   }
-  Alarm.delay(1000);*/
+  Alarm.delay(1000);
 }
 
 String getTime(){
