@@ -1,281 +1,205 @@
+/*
+ * TimeAlarmExample.pde
+ *
+ * This example calls alarm functions at 8:30 am and at 5:45 pm (17:45)
+ * and simulates turning lights on at night and off in the morning
+ * A weekly timer is set for Saturdays at 8:30:30
+ *
+ * A timer is called every 15 seconds
+ * Another timer is called once only after 10 seconds
+ *
+ * At startup the time is set to Jan 1 2011  8:29 am
+ */
+ 
+#include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <SPI.h>
 #include <Ethernet.h>
-#include <EthernetUdp.h>
 #include <Wire.h>
-#include <RTClib.h>
 #include <LiquidCrystal_I2C.h>
-#include <DHT.h>
+#include <DS1307RTC.h>
+#include "DHT.h"
+#include <Twitter.h>
 #include <Time.h>
 #include <TimeAlarms.h>
-#include <Twitter.h>
 
-#define DS1307_I2C_ADDRESS 0x68  // This is the I2C address
-// Arduino version compatibility Pre-Compiler Directives
-#if defined(ARDUINO) && ARDUINO >= 100   // Arduino v1.0 and newer
-  #define I2C_WRITE Wire.write 
-  #define I2C_READ Wire.read
-#else                                   // Arduino Prior to v1.0 
-  #define I2C_WRITE Wire.send 
-  #define I2C_READ Wire.receive
-#endif
-
-#define DHTPIN 2 
-#define DHTTYPE DHT22
-
+DHT dht(2, 22);
 LiquidCrystal_I2C lcd(0x27,16,2);
-RTC_DS1307 RTC;
-DHT dht(DHTPIN, DHTTYPE);
-EthernetUDP Udp;
-const int lcdStatusPin = 8;
+int needFilterWaterMonitor = 1;
+
 const int relayPin1 = 4;
 const int relayPin2 = 5;
 const int relayPin3 = 6;
 const int relayPin4 = 7;
-const int floatValveHighPin = 9;
-
-int lcdStatusPinState;
-int lcdStatusMenu = 0;
-int floatValveHighState;
-
-
-int freeRam () {
-  extern int __heap_start, *__brkval; 
-  int v; 
-  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
-}
-
+const int relayPin5 = 8;
+const int floatValveHighPin = 3;
+const int floatValveLowPin = 9;
 
 void setup()
 {
   byte mac[] = { 0x90, 0xA2, 0xDA, 0x0D, 0x45, 0x1D };
-//  byte mac[] = { 0x90, 0xA2, 0xDA, 0x0D, 0x44, 0xA8 };
   byte ip[] = { 192, 168, 210, 52 };
   byte twitter_server[] = { 128, 121, 146, 100 };
 
   Serial.begin(9600);
-  //Wire.begin();
-  pinMode(lcdStatusPin, INPUT);
+  Wire.begin();
+  setSyncProvider(RTC.get);
+  if(timeStatus()!= timeSet) 
+     Serial.println("Unable to sync with the RTC");
+  else
+     Serial.println("RTC has set the system time");      
+
+  Ethernet.begin(mac, ip);
+  
   pinMode(floatValveHighPin, INPUT);
+  pinMode(floatValveLowPin, INPUT);
   pinMode(relayPin1, OUTPUT);
   pinMode(relayPin2, OUTPUT);
   pinMode(relayPin3, OUTPUT);
   pinMode(relayPin4, OUTPUT);
-  digitalWrite(relayPin1, 1);
+  pinMode(relayPin5, OUTPUT);
+  digitalWrite(relayPin1, 0);
   digitalWrite(relayPin2, 1);
   digitalWrite(relayPin3, 1);
-  digitalWrite(relayPin4, 1);
-  Ethernet.begin(mac, ip);
-  Udp.begin(8888);
+  digitalWrite(relayPin4, 0);
+  digitalWrite(relayPin5, 1);
+
   lcd.init();
   lcd.backlight();
   lcd.clear();
-  lcd.setCursor(0,0);
-  
-  updateTimer();
-  // create the alarms
-  Alarm.timerRepeat(21600, updateTimer);
-  Alarm.alarmRepeat(8,30,0, MorningAlarm);  // 8:30am every day
-  Alarm.alarmRepeat(22,46,0,EveningAlarm);  // 5:45pm every day 
-  Alarm.alarmRepeat(dowSaturday,8,30,30,WeeklyAlarm);  // 8:30:30 every Saturday 
+  lcd.print("Start...");
 
- 
-  Alarm.timerRepeat(15, Repeats);            // timer for every 15 seconds    
-  Alarm.timerOnce(10, OnceOnly);             // called once after 10 seconds
-  floatValveHighState = bitRead(PORTD,floatValveHighPin);
+  //Serial.println(String(RTC.get));
+  Alarm.timerRepeat(600,PostTwitterStatus);
+
+  // create the alarms 
+  Alarm.alarmRepeat(7,46,30, waterChange);  
+//  Alarm.alarmRepeat(dowSaturday,8,30,30,WeeklyAlarm);  // 8:30:30 every Saturday 
+//  Alarm.timerRepeat(15, Repeats);            // timer for every 15 seconds    
+//  Alarm.timerOnce(10, OnceOnly);             // called once after 10 seconds 
+
+
+  postTwitter("Garage water change system started : " + getTime());
+
 }
 
-void  loop(){
-  int currentfloatValveHighState;
-  lcdStatusPinState = digitalRead(lcdStatusPin);
-  if (lcdStatusPinState == LOW){
-    //Serial.println("LOW.....");                                                                                                                                                
-    ++lcdStatusMenu;
-    if (lcdStatusMenu >= 5)
-      lcdStatusMenu = 0;
-  }
-  lcdDisplay();
+void  loop(){  
   digitalClockDisplay();
-  currentfloatValveHighState = digitalRead(floatValveHighPin);
-  if (floatValveHighState != currentfloatValveHighState ){
-    Serial.println("Float Valve High State : " + String(currentfloatValveHighState));
-    floatValveHighState = currentfloatValveHighState;
-  }
-  Alarm.delay(1000); 
+  //waterMonitor();
+  Alarm.delay(1000); // wait one second between clock display
 }
 
-void lcdDisplay(){
-  IPAddress my_ip;
-  String currentTime;
-  lcd.clear();
-  switch (lcdStatusMenu){
-    case 1:
-      lcd.display();
-      currentTime = getCurrentTime();
-      lcd.setCursor(0,0);
-      lcd.print(currentTime.substring(0,10));
-      lcd.setCursor(0,1);
-      lcd.print(currentTime.substring(11,19));
-      break;
-    case 2:
-      lcd.display();
-      my_ip = Ethernet.localIP();
-      lcd.setCursor(0,0);
-      lcd.print("IP Address :    ");
-      lcd.setCursor(0,1);
-      lcd.print(String(my_ip[0],DEC) + "." + String(my_ip[1],DEC) + "." + String(my_ip[2],DEC) + "." + String(my_ip[3],DEC));
-      break;
-    case 3:
-      lcd.display();
-      lcd.setCursor(0,0);
-      lcd.print("Air Temperature :");
-      lcd.setCursor(0,1);
-      lcd.print(getAirTemperature());
-      break;
-    case 4:
-      lcd.display();
-      lcd.setCursor(0,0);
-      lcd.print("Humidity :");
-      lcd.setCursor(0,1);
-      lcd.print(getHumidity());
-      break;
-    default:
-      lcd.noDisplay();
-  }
+
+void waterChange(){
+  
+  /*
+    1. disable fillwater ();
+    2. turn filter water off
+    3. turn pump on
+    4. turn pump off after XXXX second  ( Alarm.timerOnce(....); )
+    5. turn clean water on
+    6. full?? turn clean water off
+    7. turn clean water on after xxxxx second and enable fillwater ( alarm.timerOnce(.... ); )
+  */
+  int jobInt = 0;
+  lcd.setCursor(0,1);
+  lcd.print("WC@ " + getTimeOnly());
+  postTwitter("Start water change : " + getTime());
+  needFilterWaterMonitor = 0;
+  jobInt = jobInt + 10;
+  Alarm.timerOnce(jobInt,turnFilteredWaterOff);
+  jobInt = jobInt + 2;
+  Alarm.timerOnce(jobInt,turnFilteredWaterOff);
+  jobInt = jobInt + 5;
+  Alarm.timerOnce(jobInt,turnWaterPumpOn);
+  jobInt = jobInt + 2;
+  Alarm.timerOnce(jobInt,turnWaterPumpOn);
+  jobInt = jobInt + 180;
+  Alarm.timerOnce(jobInt,turnWaterPumpOff);
+  jobInt = jobInt + 2;
+  Alarm.timerOnce(jobInt,turnWaterPumpOff);
+  jobInt = jobInt + 5;
+  Alarm.timerOnce(jobInt,turnCleanWaterOn);
+  jobInt = jobInt + 2;
+  Alarm.timerOnce(jobInt,turnCleanWaterOn);
+  jobInt = jobInt + 180;
+  Alarm.timerOnce(jobInt,turnCleanWaterOff);
+  jobInt = jobInt + 2;
+  Alarm.timerOnce(jobInt,turnCleanWaterOff);
+  jobInt = jobInt + 3600;
+  Alarm.timerOnce(jobInt, turnCleanWaterOnAndStartMonitor);
+  jobInt = jobInt + 2;
+  Alarm.timerOnce(jobInt, turnCleanWaterOnAndStartMonitor);
 }
 
-String getCurrentTime(){
-  return String(month()) + "/" + String(day()) + "/" + String(year()) + " " + String(hour()) + ":" + returnDigits(minute()) + ":" + returnDigits(second());
+void turnFilteredWaterOff(){
+  postTwitter("Turn filtered water off : " + getTime());
+  digitalWrite(relayPin1, 1);
+  digitalWrite(relayPin2, 0);
 }
 
-void updateTimer(){
-  Serial.println("********************** Update Timer *********************");
-  time_t currentTime = getNTPTime();
-  if (currentTime == -1){
-    Serial.println("Cannot get time from NTP server");
-    setTime(0);
-  postTwitter("GWCS - Cannot get time from NTP server");
-  }else{
-    setTime(getNTPTime());
-    postTwitter("GWCS - Update Timer " + getCurrentTime());
-  }
+void turnWaterPumpOn(){
+  postTwitter("Turn water pump on : " + getTime());
+  digitalWrite(relayPin5, 0);
 }
 
-String getAirTemperature(){
-  char temp[16];
-  float temperature  = dht.readTemperature(true);
-  if (isnan(temperature)) {
-    return "-1";
-  } else {
-    dtostrf(temperature,5,2,temp);
-    return temp;
-  }
+void turnWaterPumpOff(){
+  postTwitter("Turn water pump off : " + getTime());
+  digitalWrite(relayPin5, 1);
 }
 
-String getHumidity(){
-  float humid = dht.readHumidity();
-  char humidstr[16];
-  if (isnan(humid)) {
-    return "-1";
-  } else {
-    dtostrf(humid,5,2,humidstr);
-    return humidstr;
-  }
+void turnCleanWaterOn(){
+  postTwitter("Turn clean water on : " + getTime());
+  digitalWrite(relayPin3, 0);
+  digitalWrite(relayPin4, 1);
 }
 
-time_t getNTPTime()
-{
-  const int NTP_PACKET_SIZE= 48;
-  byte packetBuffer[ NTP_PACKET_SIZE];
-  IPAddress timeServer(192, 43, 244, 18);
-  memset(packetBuffer, 0, NTP_PACKET_SIZE);
-  packetBuffer[0] = 0b11100011;
-  packetBuffer[1] = 0;
-  packetBuffer[2] = 6;
-  packetBuffer[3] = 0xEC;
-  packetBuffer[12]  = 49; 
-  packetBuffer[13]  = 0x4E;
-  packetBuffer[14]  = 49;
-  packetBuffer[15]  = 52;
-
-  Udp.beginPacket(timeServer, 123);
-  Udp.write(packetBuffer,NTP_PACKET_SIZE);
-  Udp.endPacket();
-  Alarm.delay(2000);
-  if (Udp.parsePacket()){
-    Udp.read(packetBuffer,NTP_PACKET_SIZE);
-    unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
-    unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
-    // unixtime since 1970/1/1 - timezone(PST-8) - 70years + 2s(from alarm.delay above)
-    return ((highWord << 16 | lowWord) + (60*60*-8) - 2208988800 + 2);
-  }else{
-    return -1;
-  }
+void turnCleanWaterOff(){
+  postTwitter("Turn clean water off : " + getTime());
+  digitalWrite(relayPin3, 1);
+  digitalWrite(relayPin4, 0);
 }
 
-void postTwitter(String msg){
-  // Twitter account : garage@barrowkwan.com  "Barrow Garage Aquari"
-  Twitter twitter("927020131-DEvJRTHsclJFOVEQ85ahXeH4vmYTSLGOEEDi01Vg");
-  char tmsg[msg.length()+1];
-  msg.toCharArray(tmsg,msg.length()+1);
-  if (twitter.post(tmsg)) {
-    int status = twitter.wait(&Serial);
-    if (status == 200) {
-      Serial.println("Tweets @ " + getCurrentTime());
-    } else {
-      Serial.println("Twitter failed : " + getCurrentTime());
+void turnCleanWaterOnAndStartMonitor(){
+  postTwitter("Turn clean water on after water is warm : " + getTime());
+  needFilterWaterMonitor = 1;
+  digitalWrite(relayPin3, 0);
+  digitalWrite(relayPin4, 1);
+}
+
+
+void waterMonitor(){
+   /*
+   1.  both indicate high - turn clean water on
+   2.  both indicate low - turn clean water off
+   */
+  if (needFilterWaterMonitor == 1){
+    if ((digitalRead(floatValveHighPin) == 0) && (digitalRead(floatValveLowPin) == 0)){
+      Serial.println("Water monitor turn clean water on : " + getTime());
+      digitalWrite(relayPin3, 0);
+      digitalWrite(relayPin4, 1);
+      
     }
-  } else {
-    Serial.println("Twitter connection failed.");
+    if (digitalRead(floatValveHighPin) && digitalRead(floatValveLowPin)){
+      Serial.println("Water monitor turn clean water off : " + getTime());
+      digitalWrite(relayPin3, 1);
+      digitalWrite(relayPin4, 0);
+    }
   }
-  Alarm.delay(1000);
 }
 
-
-// functions to be called when an alarm triggers:
-void MorningAlarm(){
-  Serial.println("Alarm: - turn lights off");    
-}
-
-void EveningAlarm(){
-  Serial.println("Alarm: - turn lights on");           
-}
-
-void WeeklyAlarm(){
-  Serial.println("Alarm: - its Monday Morning");      
-}
-
-void ExplicitAlarm(){
-  Serial.println("Alarm: - this triggers only at the given date and time");       
-}
-
-void Repeats(){
-  int testPin = relayPin1;
-  Serial.println("15 second timer");
-  //digitalWrite(testPin,!bitRead(PORTD,testPin));
-}
-
-void OnceOnly(){
-  Serial.println("This timer only triggers once");  
-}
 
 void digitalClockDisplay()
 {
   // digital clock display of the time
-  String currentTime = getCurrentTime();
-  Serial.println(currentTime + " -- " + freeRam());
-/*  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print(currentTime.substring(0,10));
-  lcd.setCursor(0,1);
-  lcd.print(currentTime.substring(11,19));*/
-}
-
-String returnDigits(int digits)
-{
-  if(digits < 10)
-    return "0" + String(digits);
-  return String(digits);
+  
+  Serial.print(hour());
+  printDigits(minute());
+  printDigits(second());
+  Serial.println();
+  //lcd.setCursor(0,0);
+  //lcd.print(getTimeOnly());
 }
 
 void printDigits(int digits)
@@ -284,6 +208,60 @@ void printDigits(int digits)
   if(digits < 10)
     Serial.print('0');
   Serial.print(digits);
+}
+
+void PostTwitterStatus(){
+  float temperature  = dht.readTemperature(true);
+  float humid = dht.readHumidity();
+  char temp[20];
+  char humidstr[20];
+  if (isnan(temperature)) {
+    strcpy(temp, "Cannot get Temp");
+  } else {
+    dtostrf(temperature,5,2,temp);
+  }
+  if (isnan(humid)) {
+    strcpy(humidstr, "Cannot get Humid");
+  } else {
+    dtostrf(humid,5,2,humidstr);
+  }
+  //Serial.println("Status : " + getTime() + " | " + String(temp) + " | " + String(humidstr));
+  postTwitter("Status : " + getTime() + " | " + String(temp) + " | " + String(humidstr));
+}
+
+void postTwitter(String msg){
+  Serial.println(msg);
+  // Twitter account : garage@barrowkwan.com  "Barrow Garage Aquari"
+  /*
+  Twitter twitter("927020131-DEvJRTHsclJFOVEQ85ahXeH4vmYTSLGOEEDi01Vg");
+  char tmsg[msg.length()+1];
+  msg.toCharArray(tmsg,(msg.length()+1));
+  if (twitter.post(tmsg)) {
+    int status = twitter.wait(&Serial);
+    
+    if (status == 200) {
+      Serial.println("Tweets : " + getTime());
+    } else {
+      Serial.println("Twitter failed :" + status);
+    }
+  } else {
+    Serial.println("Twitter connection failed.");
+  }
+  Alarm.delay(1000);*/
+}
+
+String getTime(){
+  char  *Mon[] = {"","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+  char timestring[22];
+  snprintf(timestring,sizeof(timestring),"%02d:%02d:%02d %02d %s %4d",hour(),minute(),second(),day(),Mon[month()],year());
+  return String(timestring);
+}
+
+
+String getTimeOnly(){
+  char timestring[9];
+  snprintf(timestring,sizeof(timestring),"%02d:%02d:%02d",hour(),minute(),second());
+  return String(timestring);
 }
 
 
