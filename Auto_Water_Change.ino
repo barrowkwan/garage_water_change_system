@@ -46,10 +46,10 @@ const int relayPin2 = 5;
 const int relayPin3 = 6;
 const int relayPin4 = 7;
 const int relayPin5 = 8;
-const int floatValveHighPin = 3;
-const int floatValveLowPin = 9;
-const char  *Mon[] = {"","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+const int floatValveHighPin = 9;
+const int floatValveLowPin = 3;
 
+int cleanWaterValve = 0;
 
 String getDateTime(int withDate=1){
   /*
@@ -58,6 +58,7 @@ String getDateTime(int withDate=1){
   snprintf(timestring,sizeof(timestring),"%02d:%02d:%02d %02d %s %4d",hour(),minute(),second(),day(),Mon[month()],year());
   return String(timestring);
   */
+  char  *Mon[] = {"","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
   String timestring = "";
   int sec, min, hr, dayOfMonth, mon, yr;
 
@@ -97,13 +98,13 @@ void setup()
   byte ip[] = { 192, 168, 210, 52 };
   //byte twitter_server[] = { 128, 121, 146, 100 };
 
-  Serial.begin(57600);
+  //Serial.begin(57600);
   Wire.begin();
   setSyncProvider(RTC.get);
-  if(timeStatus()!= timeSet) 
-     Serial.println("Unable to sync with the RTC");
-  else
-     Serial.println("RTC has set the system time");      
+  //if(timeStatus()!= timeSet) 
+    // Serial.println("Unable to sync with the RTC");
+  //else
+     //Serial.println("RTC has set the system time");      
 
   Ethernet.begin(mac, ip);
   
@@ -132,9 +133,9 @@ void setup()
   Alarm.timerRepeat(600,PostTwitterStatus);
 
   // create the alarms 
-  Alarm.alarmRepeat(12,3,0, waterChange);
-  Alarm.alarmRepeat(20,3,0, waterChange);
-  Alarm.alarmRepeat(4,3,0, waterChange);
+  Alarm.alarmRepeat(16,18,0, waterChange);
+  Alarm.alarmRepeat(0,18,0, waterChange);
+  Alarm.alarmRepeat(8,18,0, waterChange);
 //  Alarm.alarmRepeat(dowSaturday,8,30,30,WeeklyAlarm);  // 8:30:30 every Saturday 
 //  Alarm.timerRepeat(15, Repeats);            // timer for every 15 seconds    
 //  Alarm.timerOnce(10, OnceOnly);             // called once after 10 seconds 
@@ -146,8 +147,8 @@ void setup()
 }
 
 void  loop(){  
-  digitalClockDisplay();
-  //waterMonitor();
+  //digitalClockDisplay();
+  waterMonitor();
   Alarm.delay(1000); // wait one second between clock display
 }
 
@@ -230,16 +231,27 @@ void waterMonitor(){
    2.  both indicate low - turn clean water off
    */
   if (needFilterWaterMonitor == 1){
-    if ((digitalRead(floatValveHighPin) == 0) && (digitalRead(floatValveLowPin) == 0)){
-      Serial.println("Water monitor turn clean water on : " + getDateTime());
-      digitalWrite(relayPin3, 0);
-      digitalWrite(relayPin4, 1);
-      
+    if ((digitalRead(floatValveHighPin) == HIGH) && (digitalRead(floatValveLowPin) == LOW)){
+      if (cleanWaterValve == 0){
+        //Serial.println("Water monitor turn clean water on : " + getDateTime());
+        digitalWrite(relayPin3, 0);
+        digitalWrite(relayPin4, 1);
+        Alarm.delay(3000);
+        cleanWaterValve = 1;
+      }else{
+        //Serial.println("Clean Water valve is on");
+      }
     }
-    if (digitalRead(floatValveHighPin) && digitalRead(floatValveLowPin)){
-      Serial.println("Water monitor turn clean water off : " + getDateTime());
-      digitalWrite(relayPin3, 1);
-      digitalWrite(relayPin4, 0);
+    if ((digitalRead(floatValveHighPin) == LOW) && (digitalRead(floatValveLowPin) == HIGH)){
+      if (cleanWaterValve == 1){
+        //Serial.println("Water monitor turn clean water off : " + getDateTime());
+        digitalWrite(relayPin3, 1);
+        digitalWrite(relayPin4, 0);
+        Alarm.delay(3000);
+        cleanWaterValve = 0;
+      }else{
+        //Serial.println("Clean Water valve is off");
+      }
     }
   }
 }
@@ -252,6 +264,10 @@ void digitalClockDisplay()
   Serial.print(hour());
   printDigits(minute());
   printDigits(second());
+  Serial.print(" floatValveHighPin : ");
+  Serial.print(digitalRead(floatValveHighPin));
+  Serial.print(" floatValveLowPin : ");
+  Serial.print(digitalRead(floatValveLowPin));
   Serial.println();
 
 /*  lcd.setCursor(0,0);
@@ -298,15 +314,15 @@ void postTwitter(String msg){
     int status = twitter.wait(&Serial);
     
     if (status == 200) {
-      Serial.println("Tweets : " + getDateTime());
+      //Serial.println("Tweets : " + getDateTime());
     } else {
-      Serial.println("Twitter failed :" + status);
+      //Serial.println("Twitter failed :" + status);
     }
   } else {
-    Serial.println("Twitter connection failed.");
+    //Serial.println("Twitter connection failed.");
   }
   Alarm.delay(1000);
-  Serial.println(msg);
+  //Serial.println(msg);
 }
 
 
