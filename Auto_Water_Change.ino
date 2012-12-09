@@ -11,15 +11,15 @@
  * At startup the time is set to Jan 1 2011  8:29 am
  */
  
-#include <stdio.h>
-#include <time.h>
-#include <stdlib.h>
+//#include <stdio.h>
+//#include <time.h>
+//#include <stdlib.h>
 #include <SPI.h>
 #include <Ethernet.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <DS1307RTC.h>
-#include "DHT.h"
+//#include "DHT.h"
 #include <Twitter.h>
 #include <Time.h>
 #include <TimeAlarms.h>
@@ -37,9 +37,9 @@
 
 
 //DHT dht(2, 22);
-//LiquidCrystal_I2C lcd(0x27,16,2);
-int needFilterWaterMonitor = 1;
-
+LiquidCrystal_I2C lcd(0x27,16,2);
+//int needFilterWaterMonitor = 1;
+ int waterMonitorCycle=0;
 
 const int relayPin1 = 4;
 const int relayPin2 = 5;
@@ -52,31 +52,25 @@ const int floatValveLowPin = 3;
 int cleanWaterValve = 0;
 
 String getDateTime(int withDate=1){
-  /*
-  char  *Mon[] = {"","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-  char timestring[22];
-  snprintf(timestring,sizeof(timestring),"%02d:%02d:%02d %02d %s %4d",hour(),minute(),second(),day(),Mon[month()],year());
-  return String(timestring);
-  */
-  char  *Mon[] = {"","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+  const char*  Mon[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
   String timestring = "";
-  int sec, min, hr, dayOfMonth, mon, yr;
+  byte sec, minu, hr, dayOfMonth, mon, yr;
 
   sec     = second();
-  min     = minute();
-  hr       = hour();  // Need to change this if 12 hour am/pm
+  minu     = minute();
+  hr       = hour();
   dayOfMonth = day();
   mon      = month();
   yr       = year();
   
   
-    if (hr < 10)
+  if (hr < 10)
     timestring += "0";
   timestring += hr;
   timestring += ":";
-  if (min < 10)
+  if (minu < 10)
     timestring += "0";
-  timestring += min;
+  timestring += minu;
   timestring += ":";
   if (sec < 10)
     timestring += "0";
@@ -85,7 +79,7 @@ String getDateTime(int withDate=1){
     timestring += " ";
     timestring += dayOfMonth;
     timestring += " ";
-    timestring += Mon[mon];
+    timestring += Mon[mon-1];
     timestring += " ";
     timestring += yr;
   }
@@ -122,20 +116,20 @@ void setup()
   digitalWrite(relayPin5, 1);
 
 
-/*
+
   lcd.init();
   lcd.backlight();
   lcd.clear();
   lcd.print("Start...");
-*/
+
   
   //Serial.println(String(RTC.get));
-  Alarm.timerRepeat(600,PostTwitterStatus);
+  Alarm.timerRepeat(3600,PostTwitterStatus);
 
   // create the alarms 
-  Alarm.alarmRepeat(16,18,0, waterChange);
-  Alarm.alarmRepeat(0,18,0, waterChange);
-  Alarm.alarmRepeat(8,18,0, waterChange);
+  Alarm.alarmRepeat(22,26,0, waterChange);
+  Alarm.alarmRepeat(10,26,0, waterChange);
+//  Alarm.alarmRepeat(8,18,0, waterChange);
 //  Alarm.alarmRepeat(dowSaturday,8,30,30,WeeklyAlarm);  // 8:30:30 every Saturday 
 //  Alarm.timerRepeat(15, Repeats);            // timer for every 15 seconds    
 //  Alarm.timerOnce(10, OnceOnly);             // called once after 10 seconds 
@@ -146,10 +140,15 @@ void setup()
 
 }
 
-void  loop(){  
-  //digitalClockDisplay();
-  waterMonitor();
+void  loop(){
+
+  digitalClockDisplay();
+  if (waterMonitorCycle >=5){
+    waterMonitor();
+    waterMonitorCycle=0;
+  }
   Alarm.delay(1000); // wait one second between clock display
+  ++waterMonitorCycle;
 }
 
 
@@ -166,17 +165,15 @@ void waterChange(){
   */
 
 
-/*  lcd.clear();
+  lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print("WC@ " + getDateTime(0)); */
+  lcd.print("WC@ " + getDateTime(0));
   postTwitter("Start water change : " + getDateTime());
 
 
-  needFilterWaterMonitor = 0;
+//  needFilterWaterMonitor = 0;
   Alarm.delay(10000);
   turnFilteredWaterOff();
-
-
   Alarm.delay(5000);
   turnWaterPumpOn();
   Alarm.delay(180000);
@@ -187,6 +184,8 @@ void waterChange(){
   turnCleanWaterOff();
   Alarm.delay(3600000);
   turnCleanWaterOnAndStartMonitor();
+  lcd.clear();
+
 }
 
 void turnFilteredWaterOff(){
@@ -219,7 +218,7 @@ void turnCleanWaterOff(){
 
 void turnCleanWaterOnAndStartMonitor(){
   postTwitter("Turn clean water on after water is warm : " + getDateTime());
-  needFilterWaterMonitor = 1;
+//  needFilterWaterMonitor = 1;
   digitalWrite(relayPin3, 0);
   digitalWrite(relayPin4, 1);
 }
@@ -230,28 +229,26 @@ void waterMonitor(){
    1.  both indicate high - turn clean water on
    2.  both indicate low - turn clean water off
    */
-  if (needFilterWaterMonitor == 1){
-    if ((digitalRead(floatValveHighPin) == HIGH) && (digitalRead(floatValveLowPin) == LOW)){
-      if (cleanWaterValve == 0){
-        //Serial.println("Water monitor turn clean water on : " + getDateTime());
-        digitalWrite(relayPin3, 0);
-        digitalWrite(relayPin4, 1);
-        Alarm.delay(3000);
-        cleanWaterValve = 1;
-      }else{
-        //Serial.println("Clean Water valve is on");
-      }
+  if ((digitalRead(floatValveHighPin) == HIGH) && (digitalRead(floatValveLowPin) == LOW)){
+    if (cleanWaterValve == 0){
+      //Serial.println("Water monitor turn clean water on : " + getDateTime());
+      digitalWrite(relayPin3, 0);
+      digitalWrite(relayPin4, 1);
+      Alarm.delay(2000);
+      cleanWaterValve = 1;
+    }else{
+      //Serial.println("Clean Water valve is on");
     }
-    if ((digitalRead(floatValveHighPin) == LOW) && (digitalRead(floatValveLowPin) == HIGH)){
-      if (cleanWaterValve == 1){
-        //Serial.println("Water monitor turn clean water off : " + getDateTime());
-        digitalWrite(relayPin3, 1);
-        digitalWrite(relayPin4, 0);
-        Alarm.delay(3000);
-        cleanWaterValve = 0;
-      }else{
-        //Serial.println("Clean Water valve is off");
-      }
+  }
+  if ((digitalRead(floatValveHighPin) == LOW) && (digitalRead(floatValveLowPin) == HIGH)){
+    if (cleanWaterValve == 1){
+      //Serial.println("Water monitor turn clean water off : " + getDateTime());
+      digitalWrite(relayPin3, 1);
+      digitalWrite(relayPin4, 0);
+      Alarm.delay(2000);
+      cleanWaterValve = 0;
+    }else{
+      //Serial.println("Clean Water valve is off");
     }
   }
 }
@@ -261,17 +258,19 @@ void digitalClockDisplay()
 {
   // digital clock display of the time
   
-  Serial.print(hour());
+/*  Serial.print(hour());
   printDigits(minute());
   printDigits(second());
   Serial.print(" floatValveHighPin : ");
   Serial.print(digitalRead(floatValveHighPin));
   Serial.print(" floatValveLowPin : ");
   Serial.print(digitalRead(floatValveLowPin));
-  Serial.println();
+  Serial.println();*/
 
-/*  lcd.setCursor(0,0);
-  lcd.print(getDateTime(0)); */
+  lcd.setCursor(0,0);
+  lcd.print(getDateTime(0));
+/*  lcd.setCursor(0,1);
+  lcd.print("H:" + String(digitalRead(floatValveHighPin)) + " L:" + String(digitalRead(floatValveLowPin))); */
 }
 
 void printDigits(int digits)
@@ -283,7 +282,7 @@ void printDigits(int digits)
 }
 
 void PostTwitterStatus(){
-/*
+  /*
   float temperature  = dht.readTemperature(true);
   float humid = dht.readHumidity();
   char temp[20];
@@ -299,7 +298,7 @@ void PostTwitterStatus(){
     dtostrf(humid,5,2,humidstr);
   }
   //Serial.println("Status : " + getTime() + " | " + String(temp) + " | " + String(humidstr));
-  postTwitter("Status : " + getTime() + " | " + String(temp) + " | " + String(humidstr));
+  postTwitter("Status : " + getDateTime() + " | " + String(temp) + " | " + String(humidstr));
   */
   postTwitter("Status : " + getDateTime());
 }
@@ -308,8 +307,8 @@ void postTwitter(String msg){
   // Twitter account : garage@barrowkwan.com  "Barrow Garage Aquari"
   
   Twitter twitter("927020131-DEvJRTHsclJFOVEQ85ahXeH4vmYTSLGOEEDi01Vg");
-  char tmsg[msg.length()+1];
-  msg.toCharArray(tmsg,(msg.length()+1));
+  char tmsg[msg.length()];
+  msg.toCharArray(tmsg,(msg.length()));
   if (twitter.post(tmsg)) {
     int status = twitter.wait(&Serial);
     
