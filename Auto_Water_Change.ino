@@ -1,46 +1,49 @@
+/* Web_Demo.pde -- sample code for Webduino server library */
+
 /*
- * TimeAlarmExample.pde
+ * To use this demo,  enter one of the following USLs into your browser.
+ * Replace "host" with the IP address assigned to the Arduino.
  *
- * This example calls alarm functions at 8:30 am and at 5:45 pm (17:45)
- * and simulates turning lights on at night and off in the morning
- * A weekly timer is set for Saturdays at 8:30:30
+ * http://host/
+ * http://host/json
  *
- * A timer is called every 15 seconds
- * Another timer is called once only after 10 seconds
+ * This URL brings up a display of the values READ on digital pins 0-9
+ * and analog pins 0-5.  This is done with a call to defaultCmd.
+ * 
+ * 
+ * http://host/form
  *
- * At startup the time is set to Jan 1 2011  8:29 am
+ * This URL also brings up a display of the values READ on digital pins 0-9
+ * and analog pins 0-5.  But it's done as a form,  by the "formCmd" function,
+ * and the digital pins are shown as radio buttons you can change.
+ * When you click the "Submit" button,  it does a POST that sets the
+ * digital pins,  re-reads them,  and re-displays the form.
+ * 
  */
- 
-//#include <stdio.h>
-//#include <time.h>
-//#include <stdlib.h>
-#include <SPI.h>
-#include <Ethernet.h>
+
 #include <Wire.h>
+#include "SPI.h"
+#include "Ethernet.h"
+#include "WebServer.h"
 #include <LiquidCrystal_I2C.h>
-//#include "DHT.h"
-#include <Twitter.h>
-#include <DS1307RTC.h>
-#include <Time.h>
-#include <TimeAlarms.h>
+#include "RTClib.h"
 
-
-
-#define DS1307_I2C_ADDRESS 0x68  // This is the I2C address
-// Arduino version compatibility Pre-Compiler Directives
-#if defined(ARDUINO) && ARDUINO >= 100   // Arduino v1.0 and newer
-  #define I2C_WRITE Wire.write 
-  #define I2C_READ Wire.read
-#else                                   // Arduino Prior to v1.0 
-  #define I2C_WRITE Wire.send 
-  #define I2C_READ Wire.receive
-#endif
-
-
-//DHT dht(2, 22);
+RTC_DS1307 RTC;
 LiquidCrystal_I2C lcd(0x27,16,2);
-//int needFilterWaterMonitor = 1;
- int waterMonitorCycle=0;
+
+// no-cost stream operator as described at 
+// http://sundial.org/arduino/?page_id=119
+template<class T>
+inline Print &operator <<(Print &obj, T arg)
+{ obj.print(arg); return obj; }
+
+
+// CHANGE THIS TO YOUR OWN UNIQUE VALUE
+static uint8_t mac[] = { 0x90, 0xA2, 0xDA, 0x0D, 0x45, 0x1D };
+
+// CHANGE THIS TO MATCH YOUR HOST NETWORK
+static uint8_t ip[] = { 192, 168, 210, 54 };
+
 
 const int relayPin1 = 4;
 const int relayPin2 = 5;
@@ -50,58 +53,235 @@ const int relayPin5 = 8;
 const int floatValveHighPin = 9;
 const int floatValveLowPin = 3;
 
-int cleanWaterValve = 0;
 
-String getDateTime(int withDate=1){
-  const char*  Mon[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-  String timestring = "";
-  byte sec, minu, hr, dayOfMonth, mon, yr;
+#define PREFIX ""
 
-  sec     = second();
-  minu     = minute();
-  hr       = hour();
-  dayOfMonth = day();
-  mon      = month();
-  yr       = year();
+WebServer webserver(PREFIX, 80);
+
+// commands are functions that get called by the webserver framework
+// they can read any posted data from client, and they output to server
+
+void outputPins(WebServer &server, WebServer::ConnectionType type, bool addControls = false)
+{
+  DateTime now = RTC.now();
+  P(htmlHead) =
+    "<html>"
+    "<head>"
+    "<title>Arduino Web Server</title>"
+    "<style type=\"text/css\">"
+    "BODY { font-family: sans-serif }"
+    "H1 { font-size: 14pt; text-decoration: underline }"
+    "P  { font-size: 10pt; }"
+    "</style>"
+    "</head>"
+    "<body>";
+
+  int i;
+  server.httpSuccess();
+  server.printP(htmlHead);
+
+  if (addControls)
+    server << "<form action='" PREFIX "/form' method='post'>";
+
+  server << "<h1>Device Status</h1><p>";
   
+  // Show Date Time
+  server << now.month() << "/" << now.day() << "/" << now.year() << " " << now.hour() << ":" << now.minute() << ":" << now.second() << "<br/><br/>";
   
-  if (hr < 10)
-    timestring += "0";
-  timestring += hr;
-  timestring += ":";
-  if (minu < 10)
-    timestring += "0";
-  timestring += minu;
-  timestring += ":";
-  if (sec < 10)
-    timestring += "0";
-  timestring += sec;
-  if (withDate == 1){
-    timestring += " ";
-    timestring += dayOfMonth;
-    timestring += " ";
-    timestring += Mon[mon-1];
-    timestring += " ";
-    timestring += yr;
+  int sw1, sw2, devStatus;
+
+  // Water Pump Status:
+  devStatus = digitalRead(relayPin5);
+  server << "Water Pump is : ";
+  if (addControls)
+  {
+    server.radioButton("p", "1", "On", devStatus);
+    server << " ";
+    server.radioButton("p", "0", "Off", !devStatus);
+  }else{
+    server << (devStatus ? "On" : "Off");
   }
-  return timestring;
+  server << "<br/><br/>";
+  
+
+
+
+  // Aquarium Filter Ball Valve Status:
+  sw1 = digitalRead(relayPin1);
+  sw2 = digitalRead(relayPin2);
+  server << "Aquarium Filter Ball Valve is : ";
+  if ((sw1 == HIGH) && (sw2 == LOW)) {
+    devStatus = 0;
+  }
+  else if ((sw1 == LOW) && (sw2 == HIGH)) {\
+    devStatus = 1;
+  }else{
+    devStatus = -1;
+  }
+  if (addControls)
+  {
+    if (devStatus == -1)
+      server << " <font color=\"red\">(Unknown State)</font>";
+    server.radioButton("a", "1", "On", devStatus);
+    server << " ";
+    server.radioButton("a", "0", "Off", !devStatus);
+  }else{
+    if (devStatus == -1)
+      server << " <font color=red>(Unknown State)</font> ";
+    else
+      server << (devStatus ? "On" : "Off");
+  }  
+  server << "<br/><br/>";
+  
+  // Clean Water Ball Value Status:
+  sw1 = digitalRead(relayPin3);
+  sw2 = digitalRead(relayPin4);
+  server << "Clean Water Ball Valve is : ";
+  if ((sw1 == HIGH) && (sw2 == LOW)) {
+    devStatus = 0;
+  }
+  else if ((sw1 == LOW) && (sw2 == HIGH)) {\
+    devStatus = 1;
+  }else{
+    devStatus = -1;
+  }
+  if (addControls)
+  {
+    if (devStatus == -1)
+      server << " <font color=\"red\">(Unknown State)</font>";
+    server.radioButton("c", "1", "On", devStatus);
+    server << " ";
+    server.radioButton("c", "0", "Off", !devStatus);
+  }else{
+    if (devStatus == -1)
+      server << " <font color=red>(Unknown State)</font> ";
+    else
+      server << (devStatus ? "On" : "Off");
+  }  
+  server << "<br/><br/>";  
+
+  if (addControls)
+    server << "<input type='submit' value='Submit'/></form>";
+    
+  server << "<br/><br/>";  
+    
+  server << "<h1>Digital Pins</h1><p>";
+
+  for (i = 0; i <= 9; ++i)
+  {
+    // ignore the pins we use to talk to the Ethernet chip
+    int val = digitalRead(i);
+    server << "Digital " << i << ": ";
+    server << (val ? "HIGH" : "LOW");
+    server << "<br/>";
+  }
+
+  server << "</p><h1>Analog Pins</h1><p>";
+  for (i = 0; i <= 5; ++i)
+  {
+    int val = analogRead(i);
+    server << "Analog " << i << ": " << val << "<br/>";
+  }
+  server << "</p>";
+
+
+
+  server << "</body></html>";
+}
+
+void formCmd(WebServer &server, WebServer::ConnectionType type, char *url_tail, bool tail_complete)
+{
+  int deviceState;
+  if (type == WebServer::POST)
+  {
+    bool repeat;
+    char name[16], value[16];
+    do
+    {
+      repeat = server.readPOSTparam(name, 16, value, 16);
+      deviceState = strtoul(value, NULL, 10);
+      if (name[0] == 'a')
+      {
+        if (deviceState == 0){
+          digitalWrite(relayPin1, 1);
+          digitalWrite(relayPin2, 0);
+        }else{
+          digitalWrite(relayPin1, 0);
+          digitalWrite(relayPin2, 1);
+        }
+      }else if (name[0] == 'c'){
+        if (deviceState == 0){
+          digitalWrite(relayPin3, 1);
+          digitalWrite(relayPin4, 0);
+        }else{
+          digitalWrite(relayPin3, 0);
+          digitalWrite(relayPin4, 1);
+        }
+      }else if (name[0] == 'p'){
+          digitalWrite(relayPin5,deviceState);
+      }else{
+        // Do nothing
+      }
+    } while (repeat);
+
+    server.httpSeeOther(PREFIX "/form");
+  }
+  else
+    outputPins(server, type, true);
+}
+
+void defaultCmd(WebServer &server, WebServer::ConnectionType type, char *url_tail, bool tail_complete)
+{
+  outputPins(server, type, false);  
+}
+
+void lcdDisplay()
+{
+  DateTime now = RTC.now();
+  int sec, minu, hr, dayOfMonth, mon, yr;
+
+  sec     = now.second();
+  minu     = now.minute();
+  hr       = now.hour();
+  dayOfMonth = now.day();
+  mon      = now.month();
+  yr       = now.year();
+  
+  lcd.setCursor(0,0);
+  lcd.print(mon);
+  lcd.print("/");
+  lcd.print(dayOfMonth);
+  lcd.print("/");
+  lcd.print(yr);
+  lcd.setCursor(0,1);
+  if (hr < 10)
+    lcd.print("0");
+  lcd.print(hr);
+  lcd.print(":");
+  if (minu < 10)
+    lcd.print("0");
+  lcd.print(minu);
+  lcd.print(":");
+  if (sec < 10)
+    lcd.print("0");
+  lcd.print(sec);
 }
 
 void setup()
 {
-  byte mac[] = { 0x90, 0xA2, 0xDA, 0x0D, 0x45, 0x1D };
-  byte ip[] = { 192, 168, 210, 52 };
-  //byte twitter_server[] = { 128, 121, 146, 100 };
 
-  //Serial.begin(57600);
   Wire.begin();
-  setSyncProvider(RTC.get);
-  //if(timeStatus()!= timeSet) 
-    // Serial.println("Unable to sync with the RTC");
-  //else
-     //Serial.println("RTC has set the system time");      
+  RTC.begin();
+  lcd.init();
+  lcd.backlight();
+ 
 
   Ethernet.begin(mac, ip);
+  webserver.begin();
+  lcd.setCursor(0,0);
+  lcd.print("System is");
+  lcd.setCursor(0,1);
+  lcd.print("starting...");
   
   pinMode(floatValveHighPin, INPUT);
   pinMode(floatValveLowPin, INPUT);
@@ -116,220 +296,16 @@ void setup()
   digitalWrite(relayPin4, 0);
   digitalWrite(relayPin5, 1);
 
-
-
-  lcd.init();
-  lcd.backlight();
+  webserver.setDefaultCommand(&defaultCmd);
+  webserver.addCommand("form", &formCmd);
+  
   lcd.clear();
-  lcd.print("Start...");
-
-  
-  //Serial.println(String(RTC.get));
-  Alarm.timerRepeat(3600,PostTwitterStatus);
-
-  // create the alarms 
-  Alarm.alarmRepeat(22,26,0, waterChange);
-  Alarm.alarmRepeat(10,26,0, waterChange);
-//  Alarm.alarmRepeat(8,18,0, waterChange);
-//  Alarm.alarmRepeat(dowSaturday,8,30,30,WeeklyAlarm);  // 8:30:30 every Saturday 
-//  Alarm.timerRepeat(15, Repeats);            // timer for every 15 seconds    
-//  Alarm.timerOnce(10, OnceOnly);             // called once after 10 seconds 
-
-
-  postTwitter("Garage water change system started : " + getDateTime(1));
-
-
 }
 
-void  loop(){
-
-  digitalClockDisplay();
-  if (waterMonitorCycle >=5){
-    waterMonitor();
-    waterMonitorCycle=0;
-  }
-  Alarm.delay(1000); // wait one second between clock display
-  ++waterMonitorCycle;
-}
-
-
-void waterChange(){
-  
-  /*
-    1. disable fillwater ();
-    2. turn filter water off
-    3. turn pump on
-    4. turn pump off after XXXX second  ( Alarm.timerOnce(....); )
-    5. turn clean water on
-    6. full?? turn clean water off
-    7. turn clean water on after xxxxx second and enable fillwater ( alarm.timerOnce(.... ); )
-  */
-
-
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("WC@ " + getDateTime(0));
-  postTwitter("Start water change : " + getDateTime());
-
-
-//  needFilterWaterMonitor = 0;
-  Alarm.delay(10000);
-  turnFilteredWaterOff();
-  Alarm.delay(5000);
-  turnWaterPumpOn();
-  Alarm.delay(180000);
-  turnWaterPumpOff();
-  Alarm.delay(5000);
-  turnCleanWaterOn();
-  Alarm.delay(180000);
-  turnCleanWaterOff();
-  Alarm.delay(3600000);
-  turnCleanWaterOnAndStartMonitor();
-  lcd.clear();
-
-}
-
-void turnFilteredWaterOff(){
-  postTwitter("Turn filtered water off : " + getDateTime());
-  digitalWrite(relayPin1, 1);
-  digitalWrite(relayPin2, 0);
-}
-
-void turnWaterPumpOn(){
-  postTwitter("Turn water pump on : " + getDateTime());
-  digitalWrite(relayPin5, 0);
-}
-
-void turnWaterPumpOff(){
-  postTwitter("Turn water pump off : " + getDateTime());
-  digitalWrite(relayPin5, 1);
-}
-
-void turnCleanWaterOn(){
-  postTwitter("Turn clean water on : " + getDateTime());
-  digitalWrite(relayPin3, 0);
-  digitalWrite(relayPin4, 1);
-}
-
-void turnCleanWaterOff(){
-  postTwitter("Turn clean water off : " + getDateTime());
-  digitalWrite(relayPin3, 1);
-  digitalWrite(relayPin4, 0);
-}
-
-void turnCleanWaterOnAndStartMonitor(){
-  postTwitter("Turn clean water on after water is warm : " + getDateTime());
-//  needFilterWaterMonitor = 1;
-  digitalWrite(relayPin3, 0);
-  digitalWrite(relayPin4, 1);
-}
-
-
-void waterMonitor(){
-   /*
-   1.  both indicate high - turn clean water on
-   2.  both indicate low - turn clean water off
-   */
-  if ((digitalRead(floatValveHighPin) == HIGH) && (digitalRead(floatValveLowPin) == LOW)){
-    if (cleanWaterValve == 0){
-      //Serial.println("Water monitor turn clean water on : " + getDateTime());
-      digitalWrite(relayPin3, 0);
-      digitalWrite(relayPin4, 1);
-      Alarm.delay(2000);
-      cleanWaterValve = 1;
-    }else{
-      //Serial.println("Clean Water valve is on");
-    }
-  }
-  if ((digitalRead(floatValveHighPin) == LOW) && (digitalRead(floatValveLowPin) == HIGH)){
-    if (cleanWaterValve == 1){
-      //Serial.println("Water monitor turn clean water off : " + getDateTime());
-      digitalWrite(relayPin3, 1);
-      digitalWrite(relayPin4, 0);
-      Alarm.delay(2000);
-      cleanWaterValve = 0;
-    }else{
-      //Serial.println("Clean Water valve is off");
-    }
-  }
-}
-
-
-void digitalClockDisplay()
+void loop()
 {
-  // digital clock display of the time
-  
-/*  Serial.print(hour());
-  printDigits(minute());
-  printDigits(second());
-  Serial.print(" floatValveHighPin : ");
-  Serial.print(digitalRead(floatValveHighPin));
-  Serial.print(" floatValveLowPin : ");
-  Serial.print(digitalRead(floatValveLowPin));
-  Serial.println();*/
+  // process incoming connections one at a time forever
+  webserver.processConnection();
 
-  lcd.setCursor(0,0);
-  lcd.print(getDateTime(0));
-/*  lcd.setCursor(0,1);
-  lcd.print("H:" + String(digitalRead(floatValveHighPin)) + " L:" + String(digitalRead(floatValveLowPin))); */
+  // if you wanted to do other work based on a connecton, it would go here
 }
-
-void printDigits(int digits)
-{
-  Serial.print(":");
-  if(digits < 10)
-    Serial.print('0');
-  Serial.print(digits);
-}
-
-void PostTwitterStatus(){
-  /*
-  float temperature  = dht.readTemperature(true);
-  float humid = dht.readHumidity();
-  char temp[20];
-  char humidstr[20];
-  if (isnan(temperature)) {
-    strcpy(temp, "Cannot get Temp");
-  } else {
-    dtostrf(temperature,5,2,temp);
-  }
-  if (isnan(humid)) {
-    strcpy(humidstr, "Cannot get Humid");
-  } else {
-    dtostrf(humid,5,2,humidstr);
-  }
-  //Serial.println("Status : " + getTime() + " | " + String(temp) + " | " + String(humidstr));
-  postTwitter("Status : " + getDateTime() + " | " + String(temp) + " | " + String(humidstr));
-  */
-  postTwitter("Status : " + getDateTime());
-}
-
-void postTwitter(String msg){
-  // Twitter account : garage@barrowkwan.com  "Barrow Garage Aquari"
-  
-  Twitter twitter("927020131-DEvJRTHsclJFOVEQ85ahXeH4vmYTSLGOEEDi01Vg");
-  char tmsg[msg.length()];
-  msg.toCharArray(tmsg,(msg.length()));
-  if (twitter.post(tmsg)) {
-    int status = twitter.wait(&Serial);
-    
-    if (status == 200) {
-      //Serial.println("Tweets : " + getDateTime());
-    } else {
-      //Serial.println("Twitter failed :" + status);
-    }
-  } else {
-    //Serial.println("Twitter connection failed.");
-  }
-  Alarm.delay(1000);
-  //Serial.println(msg);
-}
-
-
-
-// Convert binary coded decimal to normal decimal numbers
-byte bcdToDec(byte val)
-{
-  return ( (val/16*10) + (val%16) );
-}
-
