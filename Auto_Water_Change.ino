@@ -15,7 +15,7 @@
  *
  * This URL also brings up a display of the values READ on digital pins 0-9
  * and analog pins 0-5.  But it's done as a form,  by the "formCmd" function,
- * and the digital pins are shown as radio buttons you can change.
+ * and the digital pins are shown as radio button  s you can change.
  * When you click the "Submit" button,  it does a POST that sets the
  * digital pins,  re-reads them,  and re-displays the form.
  * 
@@ -25,11 +25,11 @@
 #include "SPI.h"
 #include "Ethernet.h"
 #include "WebServer.h"
-#include <LiquidCrystal_I2C.h>
-#include "RTClib.h"
+//#include <LiquidCrystal_I2C.h>
+//#include "RTClib.h"
 
-RTC_DS1307 RTC;
-LiquidCrystal_I2C lcd(0x27,16,2);
+//RTC_DS1307 RTC;
+//LiquidCrystal_I2C lcd(0x27,16,2);
 
 // no-cost stream operator as described at 
 // http://sundial.org/arduino/?page_id=119
@@ -39,10 +39,12 @@ inline Print &operator <<(Print &obj, T arg)
 
 
 // CHANGE THIS TO YOUR OWN UNIQUE VALUE
-static uint8_t mac[] = { 0x90, 0xA2, 0xDA, 0x0D, 0x45, 0x1D };
+static uint8_t mac[] = { 0x90, 0xA2, 0xDA, 0x0D, 0x44, 0xA8 };
+//static uint8_t mac[] = { 0x90, 0xA2, 0xDA, 0x0D, 0x45, 0x1D };
 
 // CHANGE THIS TO MATCH YOUR HOST NETWORK
-static uint8_t ip[] = { 192, 168, 210, 54 };
+static uint8_t ip[] = { 192, 168, 210, 52 };
+//static uint8_t ip[] = { 192, 168, 210, 54 };
 
 
 const int relayPin1 = 4;
@@ -63,7 +65,7 @@ WebServer webserver(PREFIX, 80);
 
 void outputPins(WebServer &server, WebServer::ConnectionType type, bool addControls = false)
 {
-  DateTime now = RTC.now();
+  //DateTime now = RTC.now();
   P(htmlHead) =
     "<html>"
     "<head>"
@@ -83,10 +85,12 @@ void outputPins(WebServer &server, WebServer::ConnectionType type, bool addContr
   if (addControls)
     server << "<form action='" PREFIX "/form' method='post'>";
 
+
+  server << "<h1>Garage Water Changing System</h1><p><br/>";
   server << "<h1>Device Status</h1><p>";
   
   // Show Date Time
-  server << now.month() << "/" << now.day() << "/" << now.year() << " " << now.hour() << ":" << now.minute() << ":" << now.second() << "<br/><br/>";
+  //server << now.month() << "/" << now.day() << "/" << now.year() << " " << now.hour() << ":" << now.minute() << ":" << now.second() << "<br/><br/>";
   
   int sw1, sw2, devStatus;
 
@@ -95,11 +99,11 @@ void outputPins(WebServer &server, WebServer::ConnectionType type, bool addContr
   server << "Water Pump is : ";
   if (addControls)
   {
-    server.radioButton("p", "1", "On", devStatus);
+    server.radioButton("p", "0", "On", !devStatus);
     server << " ";
-    server.radioButton("p", "0", "Off", !devStatus);
+    server.radioButton("p", "1", "Off", devStatus);
   }else{
-    server << (devStatus ? "On" : "Off");
+    server << (devStatus ? "Off" : "On");
   }
   server << "<br/><br/>";
   
@@ -122,14 +126,14 @@ void outputPins(WebServer &server, WebServer::ConnectionType type, bool addContr
   {
     if (devStatus == -1)
       server << " <font color=\"red\">(Unknown State)</font>";
-    server.radioButton("a", "1", "On", devStatus);
+    server.radioButton("a", "0", "On", !devStatus);
     server << " ";
-    server.radioButton("a", "0", "Off", !devStatus);
+    server.radioButton("a", "1", "Off", devStatus);
   }else{
     if (devStatus == -1)
       server << " <font color=red>(Unknown State)</font> ";
     else
-      server << (devStatus ? "On" : "Off");
+      server << (devStatus ? "Off" : "On");
   }  
   server << "<br/><br/>";
   
@@ -154,17 +158,36 @@ void outputPins(WebServer &server, WebServer::ConnectionType type, bool addContr
     server.radioButton("c", "0", "Off", !devStatus);
   }else{
     if (devStatus == -1)
-      server << " <font color=red>(Unknown State)</font> ";
+      server << " <font color=\"red\">(Unknown State)</font> ";
     else
       server << (devStatus ? "On" : "Off");
   }  
-  server << "<br/><br/>";  
+  server << "<br/>";  
 
   if (addControls)
-    server << "<input type='submit' value='Submit'/></form>";
+    server << "<br/><input type='submit' value='Submit'/></form>";
     
-  server << "<br/><br/>";  
-    
+  server << "<br/>";
+  
+  sw1 = digitalRead(floatValveHighPin);
+  sw2 = digitalRead(floatValveLowPin);
+  server << "Filter Box water level is : " ;
+  if ((sw1 == HIGH) && (sw2 == LOW)) {
+    devStatus = 0;
+  }
+  else if ((sw1 == LOW) && (sw2 == HIGH)) {\
+    devStatus = 1;
+  }else{
+    devStatus = -1;
+  }
+  if (devStatus == -1)
+    server << " <font color=\"green\">Average</font> ";
+  else
+    server << (devStatus ? "<font color=\"blue\">High</font>" : "<font color=\"red\">Low</font>");
+  
+  server << "<br/><br/>";
+
+  
   server << "<h1>Digital Pins</h1><p>";
 
   for (i = 0; i <= 9; ++i)
@@ -205,20 +228,25 @@ void formCmd(WebServer &server, WebServer::ConnectionType type, char *url_tail, 
         if (deviceState == 0){
           digitalWrite(relayPin1, 1);
           digitalWrite(relayPin2, 0);
+          delay(2000);
         }else{
           digitalWrite(relayPin1, 0);
           digitalWrite(relayPin2, 1);
+          delay(2000);
         }
       }else if (name[0] == 'c'){
         if (deviceState == 0){
           digitalWrite(relayPin3, 1);
           digitalWrite(relayPin4, 0);
+          delay(2000);
         }else{
           digitalWrite(relayPin3, 0);
           digitalWrite(relayPin4, 1);
+          delay(2000);
         }
       }else if (name[0] == 'p'){
           digitalWrite(relayPin5,deviceState);
+          delay(2000);
       }else{
         // Do nothing
       }
@@ -235,53 +263,17 @@ void defaultCmd(WebServer &server, WebServer::ConnectionType type, char *url_tai
   outputPins(server, type, false);  
 }
 
-void lcdDisplay()
-{
-  DateTime now = RTC.now();
-  int sec, minu, hr, dayOfMonth, mon, yr;
 
-  sec     = now.second();
-  minu     = now.minute();
-  hr       = now.hour();
-  dayOfMonth = now.day();
-  mon      = now.month();
-  yr       = now.year();
-  
-  lcd.setCursor(0,0);
-  lcd.print(mon);
-  lcd.print("/");
-  lcd.print(dayOfMonth);
-  lcd.print("/");
-  lcd.print(yr);
-  lcd.setCursor(0,1);
-  if (hr < 10)
-    lcd.print("0");
-  lcd.print(hr);
-  lcd.print(":");
-  if (minu < 10)
-    lcd.print("0");
-  lcd.print(minu);
-  lcd.print(":");
-  if (sec < 10)
-    lcd.print("0");
-  lcd.print(sec);
-}
 
 void setup()
 {
-
+  Serial.begin(57600);
   Wire.begin();
-  RTC.begin();
-  lcd.init();
-  lcd.backlight();
- 
+  //RTC.begin();
+
 
   Ethernet.begin(mac, ip);
   webserver.begin();
-  lcd.setCursor(0,0);
-  lcd.print("System is");
-  lcd.setCursor(0,1);
-  lcd.print("starting...");
   
   pinMode(floatValveHighPin, INPUT);
   pinMode(floatValveLowPin, INPUT);
@@ -299,13 +291,33 @@ void setup()
   webserver.setDefaultCommand(&defaultCmd);
   webserver.addCommand("form", &formCmd);
   
-  lcd.clear();
 }
 
 void loop()
 {
   // process incoming connections one at a time forever
   webserver.processConnection();
+  checkFilterBoxWaterLevel();
 
   // if you wanted to do other work based on a connecton, it would go here
+}
+
+
+void checkFilterBoxWaterLevel(){
+  int sw1, sw2, devStatus=1;
+  
+  sw1 = digitalRead(floatValveHighPin);
+  sw2 = digitalRead(floatValveLowPin);
+
+  if ((sw1 == LOW) && (sw2 == HIGH)) {
+    devStatus = 0;
+  }else{
+    devStatus = 1;
+  }
+  if (devStatus == 0){
+    digitalWrite(relayPin3, 1);
+    digitalWrite(relayPin4, 0);
+
+  }
+ 
 }
